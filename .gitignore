@@ -1,2 +1,12 @@
 /venv
 operate_log.md
+
+# CubeIDE 
+.cproject
+.project
+.settings/
+Debug/
+Startup/
+*.ld
+*.cfg
+*.launch
