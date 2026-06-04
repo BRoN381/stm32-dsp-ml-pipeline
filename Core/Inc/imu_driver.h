@@ -75,4 +75,6 @@ void IMU_EXTI_Handler(void);
  */
 void IMU_DMA_TC_Handler(void);
 
+void IMU_Start_Batch_Read_Polling(void);
+
 #endif /* IMU_DRIVER_H */

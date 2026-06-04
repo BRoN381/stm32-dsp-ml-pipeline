@@ -8,7 +8,7 @@
  *   1 = DMA memory-to-memory 測試
  *   後續可加 2, 3, ...
  * ============================================================ */
-#define MODE 2
+#define MODE 0
 
 /* ============================================================
  *   外部測試函式 forward declaration
@@ -97,7 +97,6 @@ void EXTI15_10_IRQHandler(void) {
 }
 
 void DMA1_Stream0_IRQHandler(void) {
-    uart_print("DMA ISR entered\r\n");
     IMU_DMA_TC_Handler();
 }
 #endif

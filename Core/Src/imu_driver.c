@@ -44,6 +44,7 @@
 #define DMA1_LISR       (*((volatile uint32_t *)(DMA1_BASE + 0x00)))
 #define DMA1_LIFCR      (*((volatile uint32_t *)(DMA1_BASE + 0x08)))
 #define DMA1_S0CR       (*((volatile uint32_t *)(DMA1_BASE + 0x10)))
+#define DMA1_S0FCR      (*((volatile uint32_t *)(DMA1_BASE + 0x24)))
 #define DMA1_S0NDTR     (*((volatile uint32_t *)(DMA1_BASE + 0x14)))
 #define DMA1_S0PAR      (*((volatile uint32_t *)(DMA1_BASE + 0x18)))
 #define DMA1_S0M0AR     (*((volatile uint32_t *)(DMA1_BASE + 0x1C)))
@@ -117,6 +118,15 @@ void IMU_Init(void) {
     RCC_AHB1ENR  |= (1 << 0);            // DMA1
     RCC_APB4ENR  |= (1 << 1);            // SYSCFG
 
+    /* ★ Hardware peripheral reset */
+    #define RCC_AHB1RSTR    (*((volatile uint32_t *)0x58024488))
+    #define RCC_APB1LRSTR   (*((volatile uint32_t *)0x58024498))
+    
+    RCC_AHB1RSTR  |= (1 << 0);     // DMA1 reset
+    RCC_AHB1RSTR  &= ~(1 << 0);
+    RCC_APB1LRSTR |= (1 << 21);    // I2C1 reset
+    RCC_APB1LRSTR &= ~(1 << 21);
+
     /* 2. Configure GPIOB for I2C1 (PB8=SCL, PB9=SDA) */
     GPIOB_MODER   &= ~((3 << 16) | (3 << 18));
     GPIOB_MODER   |=  ((2 << 16) | (2 << 18)); // Alternate Function
@@ -145,21 +155,22 @@ void IMU_Init(void) {
 
     /* 4. Configure I2C1 */
     I2C1_TIMINGR = 0x10C0ECFF; // ~100kHz depending on core clock, consider changing to 400kHz later
-    I2C1_CR1 |= (1 << 0); // PE: Peripheral Enable
     // Enable I2C DMA RX Request
-    I2C1_CR1 |= (1 << 14); // RXDMAEN
+    I2C1_CR1 = (1 << 14); // RXDMAEN
+    I2C1_CR1 |= (1 << 0); // PE: Peripheral Enable
 
     /* 5. Configure DMA1 Stream 0 for I2C1_RX */
     DMA1_S0CR &= ~(1 << 0); // Disable stream to configure
     while(DMA1_S0CR & (1 << 0)); // Wait until disabled
     
-    // DMA Request mapping via DMAMUX1 (I2C1_RX is request 32)
+    // DMA Request mapping via DMAMUX1 (I2C1_RX is request 33)
     DMAMUX1_C0CR = 33;
 
     DMA1_S0PAR = (uint32_t)&I2C1_RXDR; // Peripheral address
     DMA1_S0M0AR = (uint32_t)rx_buffer; // Memory address
     // Priority: High(2), MSIZE: 8-bit(0), PSIZE: 8-bit(0), MINC: Enable(1), PINC: Disable(0), DIR: P2M(0)
-    DMA1_S0CR = (2 << 16) | (1 << 10) | (1 << 4); // MINC=1, TCIE=1 (Transfer Complete Interrupt Enable)
+    DMA1_S0CR = (2 << 16) | (1 << 10) | (1 << 4) | (1 << 2); // MINC=1, TCIE=1 (Transfer Complete Interrupt Enable)
+    DMA1_S0FCR = 0;
 
     // Enable DMA1 Stream 0 Interrupt in NVIC (DMA1_Stream0 is IRQ11)
     NVIC_ISER0 |= (1 << 11);
@@ -189,16 +200,41 @@ void IMU_Init(void) {
 }
 
 void IMU_Start_Batch_Read(void) {
+    /* 0. 清掉所有 I2C sticky flag(BERR、STOPF、NACKF 等) */
+    I2C1_ICR = (1 << 3)   // ADDRCF
+             | (1 << 4)   // NACKCF
+             | (1 << 5)   // STOPCF
+             | (1 << 8)   // BERRCF   ← 關鍵
+             | (1 << 9)   // ARLOCF
+             | (1 << 10)  // OVRCF
+             | (1 << 11)  // PECCF
+             | (1 << 12)  // TIMOUTCF
+             | (1 << 13); // ALERTCF
+    
+    /* 等 BUSY clear (但加 timeout 避免卡死) */
+    uint32_t timeout = 100000;
+    while ((I2C1_ISR & (1 << 15)) && timeout--);
+    if (timeout == 0) {
+        uart_print("BUSY stuck, forcing PE reset\r\n");
+        I2C1_CR1 &= ~(1 << 0);          // PE=0
+        for (volatile int i=0; i<100; i++);
+        I2C1_CR1 |= (1 << 0);           // PE=1 (RXDMAEN 保留)
+    }
+
     // 1. 停止並重置 DMA
     DMA1_S0CR &= ~(1 << 0);
     while (DMA1_S0CR & (1 << 0));
-    DMA1_LIFCR = (1 << 5);
+    DMA1_LIFCR = 0x3F;          
+
+    DMAMUX1_C0CR = 33;
 
     // 2. 重新設定所有 DMA 參數（每次都要重寫）
-    DMA1_S0PAR   = (uint32_t)&I2C1_RXDR;   // ← 加這行
+    DMA1_S0PAR   = (uint32_t)&I2C1_RXDR;
     DMA1_S0M0AR  = (uint32_t)rx_buffer;
     DMA1_S0NDTR  = BATCH_BUFFER_SIZE;
-    DMA1_S0CR    = (2 << 16) | (1 << 10) | (1 << 4); // 維持原本設定
+    DMA1_S0CR    = (2 << 16) | (1 << 10) | (1 << 4) | (1 << 2);
+    // DMA1_S0FCR = (1 << 2) | (3 << 0);   ← 拿掉
+    DMA1_S0FCR = 0;
 
     // 3. I2C write phase
     while (I2C1_ISR & (1 << 15));
@@ -209,22 +245,85 @@ void IMU_Start_Batch_Read(void) {
     while (!(I2C1_ISR & (1 << 6)));
 
     // 4. I2C read phase 設定
-    I2C1_CR2 = (MPU6050_ADDR) | (BATCH_BUFFER_SIZE << 16) | (1 << 10);
+    I2C1_CR2 = (MPU6050_ADDR) | (BATCH_BUFFER_SIZE << 16) | (1 << 10) | (1 << 25);
 
     // 5. Enable DMA
     DMA1_S0CR |= (1 << 0);
+    uart_print("After DMA EN:\r\n");
+    uart_print("  S0CR:    "); uart_print_hex32(DMA1_S0CR); uart_print("\r\n");
+    uart_print("  S0FCR:   "); uart_print_hex32(DMA1_S0FCR); uart_print("\r\n");      // 新增
+    uart_print("  CR1:     "); uart_print_hex32(I2C1_CR1); uart_print("\r\n");
+    uart_print("  CR2:     "); uart_print_hex32(I2C1_CR2); uart_print("\r\n");        // 新增
+    uart_print("  ISR:     "); uart_print_hex32(I2C1_ISR); uart_print("\r\n");
+    uart_print("  DMAMUX:  "); uart_print_hex32(DMAMUX1_C0CR); uart_print("\r\n");    // ★ 關鍵
 
     // 6. RESTART (read phase 開始)
     I2C1_CR2 |= (1 << 13);
 
-    // 等 I2C + DMA 跑完 240 bytes @ 400kHz ≈ 6ms,給多一點
-    for (volatile int i = 0; i < 2000000; i++);
+    // 短等
+    for (volatile int i = 0; i < 50000; i++);
+    uart_print("After 50k cycles:\r\n");
+    uart_print("  NDTR: "); uart_print_hex32(DMA1_S0NDTR); uart_print("\r\n");
+    uart_print("  LISR: "); uart_print_hex32(DMA1_LISR); uart_print("\r\n");
+    uart_print("  ISR:  "); uart_print_hex32(I2C1_ISR); uart_print("\r\n");
 
-    uart_print("rx_buf: "); uart_print_hex32((uint32_t)rx_buffer); uart_print("\r\n");
-    uart_print("S0CR:   "); uart_print_hex32(DMA1_S0CR);           uart_print("\r\n");
-    uart_print("LISR:   "); uart_print_hex32(DMA1_LISR);           uart_print("\r\n");
-    uart_print("NDTR:   "); uart_print_hex32(DMA1_S0NDTR);         uart_print("\r\n");
-    uart_print("ISR:    "); uart_print_hex32(I2C1_ISR);            uart_print("\r\n");
+    for (volatile int i = 0; i < 500000; i++);
+    uart_print("After 500k cycles:\r\n");
+    uart_print("  NDTR: "); uart_print_hex32(DMA1_S0NDTR); uart_print("\r\n");
+    uart_print("  LISR: "); uart_print_hex32(DMA1_LISR); uart_print("\r\n");
+    uart_print("  ISR:  "); uart_print_hex32(I2C1_ISR); uart_print("\r\n");
+    }
+
+void IMU_Start_Batch_Read_Polling(void) {
+    uart_print("Polling read start\r\n");
+    
+    // Print CR1 確認 PE + RXDMAEN 真的 set 了
+    uart_print("I2C1_CR1: "); uart_print_hex32(I2C1_CR1); uart_print("\r\n");
+    
+    // ----- Write phase: 發 register address -----
+    uint32_t busy_timeout = 1000000;
+    while ((I2C1_ISR & (1 << 15)) && busy_timeout--);
+    if (busy_timeout == 0) { uart_print("BUSY timeout!\r\n"); return; }
+    
+    I2C1_CR2 = (MPU6050_ADDR) | (1 << 16) | (0 << 10);
+    I2C1_CR2 |= (1 << 13);                       // START
+    
+    uint32_t t = 100000;
+    while (!(I2C1_ISR & (1 << 1)) && t--);       // TXIS
+    if (t == 0) { uart_print("TXIS timeout, ISR="); uart_print_hex32(I2C1_ISR); uart_print("\r\n"); return; }
+    I2C1_TXDR = MPU_FIFO_R_W;
+    
+    t = 100000;
+    while (!(I2C1_ISR & (1 << 6)) && t--);       // TC
+    if (t == 0) { uart_print("TC timeout, ISR="); uart_print_hex32(I2C1_ISR); uart_print("\r\n"); return; }
+    
+    uart_print("Write phase OK, ISR="); uart_print_hex32(I2C1_ISR); uart_print("\r\n");
+    
+    // ----- Read phase: 改用 AUTOEND 自動發 STOP -----
+    I2C1_CR2 = (MPU6050_ADDR) | (BATCH_BUFFER_SIZE << 16) | (1 << 10) | (1 << 25);
+    //                                                                   ↑ AUTOEND
+    I2C1_CR2 |= (1 << 13);                       // RESTART
+    
+    // 一個一個 byte 讀
+    for (int i = 0; i < BATCH_BUFFER_SIZE; i++) {
+        t = 1000000;
+        while (!(I2C1_ISR & (1 << 2)) && t--);   // RXNE
+        if (t == 0) {
+            uart_print("RXNE timeout at i="); uart_print_hex32(i);
+            uart_print(", ISR="); uart_print_hex32(I2C1_ISR); uart_print("\r\n");
+            return;
+        }
+        rx_buffer[i] = I2C1_RXDR;
+    }
+    
+    // 等 STOPF
+    t = 100000;
+    while (!(I2C1_ISR & (1 << 5)) && t--);
+    I2C1_ICR = (1 << 5);                         // Clear STOPF
+    
+    uart_print("Polling read DONE, final ISR="); uart_print_hex32(I2C1_ISR); uart_print("\r\n");
+    
+    imu_dma_complete = 1;  // 騙 main loop 走 parse 流程
 }
 
 void IMU_Parse_Data(IMU_Sample_t* parsed_data) {
@@ -260,10 +359,8 @@ void IMU_DMA_TC_Handler(void) {
     // Check Transfer Complete flag for Stream 0 (Bit 5 in LISR)
     if (DMA1_LISR & (1 << 5)) {
         DMA1_LIFCR = (1 << 5); // Clear TCIF0
-
         // Stop I2C transaction
-        I2C1_CR2 |= (1 << 14); // STOP
-
+        // I2C1_CR2 |= (1 << 14); // STOP
         imu_dma_complete = 1;
     }
 }
