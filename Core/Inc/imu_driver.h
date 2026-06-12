@@ -9,11 +9,6 @@
 #define BYTES_PER_SAMPLE     12   // 6 bytes Accel + 6 bytes Gyro
 #define BATCH_BUFFER_SIZE    (BATCH_SIZE_SAMPLES * BYTES_PER_SAMPLE)
 
-/* --- Status Flags --- */
-// Extern flags used for synchronization between ISRs and the main loop.
-extern volatile uint8_t imu_fifo_ready;
-extern volatile uint8_t imu_dma_complete;
-
 /* --- Data Structures --- */
 typedef struct {
     int16_t acc_x;
@@ -24,7 +19,17 @@ typedef struct {
     int16_t gyro_z;
 } IMU_Sample_t;
 
+/* --- Status Flags --- */
+// Extern flags used for synchronization between ISRs and the main loop.
+extern volatile uint8_t imu_batch_ready;
+extern volatile uint8_t imu_dma_complete;
+extern IMU_Sample_t imu_batch[BATCH_SIZE_SAMPLES];
+extern volatile uint8_t imu_sample_pending;
+
+
 /* --- Function Prototypes --- */
+
+void IMU_Process_Sample(void);
 
 /**
  * @brief Initializes the MPU6050 and STM32 hardware peripherals.
