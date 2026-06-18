@@ -10,3 +10,6 @@ Startup/
 *.ld
 *.cfg
 *.launch
+
+# Claude Code local config
+.claude/

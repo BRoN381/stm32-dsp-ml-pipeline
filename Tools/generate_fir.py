@@ -8,7 +8,7 @@ def generate_c_array(name, data):
 
 def main():
     # FIR Filter Parameters
-    sample_rate = 100.0   # Hz (IMU sampling rate)
+    sample_rate = 500.0   # Hz (IMU sampling rate: 1kHz gyro / (1+SMPLRT_DIV=1))
     cutoff_hz = 5.0       # Hz (Low-pass cutoff frequency for hand gestures)
     num_taps = 31         # Must match FIR_TAPS in signal_processing.h
     

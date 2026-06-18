@@ -49,6 +49,11 @@ typedef struct {
     FIR_FilterState gyro_y_filter;
     FIR_FilterState gyro_z_filter;
     Complementary_FilterState attitude;
+
+    /* Most recent FIR-filtered accelerometer outputs (for inspection/debug). */
+    float filt_acc_x;
+    float filt_acc_y;
+    float filt_acc_z;
 } IMU_ProcessingState;
 
 /* ====================================================================
@@ -78,7 +83,7 @@ float FIR_ProcessSingle(FIR_FilterState* state, float input, const float* coeffs
  * @param acc_z Filtered Z-axis accelerometer data.
  * @param gyro_x Filtered X-axis gyroscope data (pitch rate).
  * @param gyro_y Filtered Y-axis gyroscope data (roll rate).
- * @param dt Sampling interval in seconds (e.g., 0.01 for 100Hz).
+ * @param dt Sampling interval in seconds (e.g., 0.002 for 500Hz).
  */
 void Complementary_Process(Complementary_FilterState* state, 
                            float acc_x, float acc_y, float acc_z, 
