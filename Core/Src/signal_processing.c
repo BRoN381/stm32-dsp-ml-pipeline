@@ -150,6 +150,124 @@ void SignalProcessing_Update(IMU_ProcessingState* state,
 
     /* 3. Update attitude estimate (pitch/roll). */
     Complementary_Process(&state->attitude, ax, ay, az, gx_dps, gy_dps, dt);
+
+    /* 4. Feed the filtered accel into the gesture recognizer (per sample). */
+    state->last_gesture = Gesture_ProcessSample(&state->gesture, ax, ay, az);
+}
+
+/* ====================================================================
+ * Gesture recognition (rule-based shake detector)
+ * ==================================================================== */
+
+/* Internal state-machine values for GestureState.state. */
+enum { GST_IDLE = 0, GST_ACTIVE, GST_COOLDOWN };
+
+void Gesture_Init(GestureState* g) {
+    memset(g, 0, sizeof(*g));   /* state = GST_IDLE, grav_init = 0 */
+}
+
+const char* Gesture_Name(GestureType t) {
+    switch (t) {
+        case GESTURE_SHAKE_X: return "SHAKE FWD-BACK (X)";
+        case GESTURE_SHAKE_Y: return "SHAKE LEFT-RIGHT (Y)";
+        case GESTURE_SHAKE_Z: return "SHAKE UP-DOWN (Z)";
+        default:              return "NONE";
+    }
+}
+
+/* Classify the just-finished gesture from the accumulated AC energy and
+   zero-crossing counts. Returns GESTURE_NONE if it fails the sanity checks. */
+static GestureType gesture_classify(const GestureState* g) {
+    if (g->active_count < GESTURE_MIN_LEN) {
+        return GESTURE_NONE;   /* too short — likely a bump, not a shake */
+    }
+
+    /* Dominant axis = the one with the most AC energy. */
+    GestureType type;
+    int zc;
+    if (g->energy_x >= g->energy_y && g->energy_x >= g->energy_z) {
+        type = GESTURE_SHAKE_X; zc = g->zc_x;
+    } else if (g->energy_y >= g->energy_z) {
+        type = GESTURE_SHAKE_Y; zc = g->zc_y;
+    } else {
+        type = GESTURE_SHAKE_Z; zc = g->zc_z;
+    }
+
+    /* Require real oscillation on the dominant axis (rules out a single
+       push/tap, which has too few direction reversals). */
+    if (zc < GESTURE_MIN_ZC) {
+        return GESTURE_NONE;
+    }
+    return type;
+}
+
+GestureType Gesture_ProcessSample(GestureState* g, float ax, float ay, float az) {
+    /* Track gravity (DC) with a slow EMA, then work on the AC residual so
+       static tilt never triggers a gesture. */
+    if (!g->grav_init) {
+        g->grav_x = ax; g->grav_y = ay; g->grav_z = az;
+        g->grav_init = 1;
+    } else {
+        g->grav_x = GRAV_ALPHA * g->grav_x + (1.0f - GRAV_ALPHA) * ax;
+        g->grav_y = GRAV_ALPHA * g->grav_y + (1.0f - GRAV_ALPHA) * ay;
+        g->grav_z = GRAV_ALPHA * g->grav_z + (1.0f - GRAV_ALPHA) * az;
+    }
+
+    float acx = ax - g->grav_x;
+    float acy = ay - g->grav_y;
+    float acz = az - g->grav_z;
+    float mag = sqrtf(acx * acx + acy * acy + acz * acz);
+
+    GestureType result = GESTURE_NONE;
+
+    switch (g->state) {
+        case GST_IDLE:
+            if (mag > GESTURE_ONSET_LSB) {
+                /* Start of a gesture: reset accumulators. */
+                g->state = GST_ACTIVE;
+                g->active_count = 0;
+                g->energy_x = g->energy_y = g->energy_z = 0.0f;
+                g->zc_x = g->zc_y = g->zc_z = 0;
+                g->prev_ac_x = g->prev_ac_y = g->prev_ac_z = 0.0f;
+            }
+            break;
+
+        case GST_ACTIVE:
+            g->active_count++;
+
+            /* Accumulate per-axis energy. */
+            g->energy_x += acx * acx;
+            g->energy_y += acy * acy;
+            g->energy_z += acz * acz;
+
+            /* Count sign changes (zero-crossings) = oscillation evidence. */
+            if (acx * g->prev_ac_x < 0.0f) g->zc_x++;
+            if (acy * g->prev_ac_y < 0.0f) g->zc_y++;
+            if (acz * g->prev_ac_z < 0.0f) g->zc_z++;
+            g->prev_ac_x = acx;
+            g->prev_ac_y = acy;
+            g->prev_ac_z = acz;
+
+            /* End when motion settles (hysteresis) or we hit the time cap. */
+            if (mag < GESTURE_OFFSET_LSB || g->active_count >= GESTURE_MAX_LEN) {
+                result = gesture_classify(g);
+                g->state = GST_COOLDOWN;
+                g->cooldown_count = 0;
+            }
+            break;
+
+        case GST_COOLDOWN:
+            if (++g->cooldown_count >= GESTURE_COOLDOWN) {
+                g->state = GST_IDLE;
+            }
+            break;
+
+        default:
+            g->state = GST_IDLE;
+            break;
+    }
+
+    return result;
 }
 
 // ====================================================================

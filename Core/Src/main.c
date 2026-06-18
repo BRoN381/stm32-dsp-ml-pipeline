@@ -51,12 +51,19 @@ static void app_run(void) {
             batch_received_count++;
 
             /* Feed all 20 samples through the filter pipeline in order so
-               the FIR history stays continuous across batches. */
+               the FIR history stays continuous across batches. Print a
+               gesture event the moment one is recognized. */
             for (int i = 0; i < BATCH_SIZE_SAMPLES; i++) {
                 SignalProcessing_Update(&g_proc,
                     (float)imu_batch[i].acc_x, (float)imu_batch[i].acc_y, (float)imu_batch[i].acc_z,
                     (float)imu_batch[i].gyro_x, (float)imu_batch[i].gyro_y, (float)imu_batch[i].gyro_z,
                     IMU_DT);
+
+                if (g_proc.last_gesture != GESTURE_NONE) {
+                    uart_print(">>> GESTURE: ");
+                    uart_print(Gesture_Name(g_proc.last_gesture));
+                    uart_print("\r\n");
+                }
             }
 
             /* Raw vs FIR-filtered acc_z (last sample, time-aligned) so the
