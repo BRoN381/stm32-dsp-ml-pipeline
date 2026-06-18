@@ -1,8 +1,9 @@
 # stm32-dsp-ml-pipeline
 
 Bare-metal gesture recognition pipeline on STM32H753ZI (ARM Cortex-M7 @ 480 MHz),
-combining hand-written peripheral drivers, CMSIS-DSP SIMD signal processing,
-and on-device CNN inference via TensorFlow Lite Micro.
+combining hand-written peripheral drivers, hand-written SIMD signal
+processing (Cortex-M7 DSP intrinsics), and on-device CNN inference via
+TensorFlow Lite Micro.
 
 This project is built from the ground up without HAL — every register write
 is intentional. The goal is to demonstrate hardware-level fluency and the
@@ -15,7 +16,7 @@ ability to bridge low-level driver work with modern embedded ML.
 | Phase | Component                                        | Status         |
 |-------|--------------------------------------------------|----------------|
 | 1     | Bare-metal I2C driver + MPU-6050 acquisition     | ✅ Complete    |
-| 2     | FIR filter with CMSIS-DSP SIMD optimization      | 🚧 In progress |
+| 2     | FIR filter + hand-written SIMD optimization      | ✅ Complete    |
 | 3     | CNN inference via TFLite Micro                   | ⏳ Planned     |
 | 4     | Benchmarking, CI, documentation polish           | ⏳ Planned     |
 
@@ -61,9 +62,11 @@ v
 
 +-----------------+
 
-| FIR filter      |   <-- Phase 2: 🚧
+| FIR filter      |   <-- Phase 2: ✅
 
-| (CMSIS-DSP SIMD)|
+| (hand-written   |
+
+|  SIMD)          |
 
 +--------+--------+
 
@@ -269,13 +272,29 @@ re-investigation of the DMA path.
 
 ## Roadmap
 
-### Phase 2 (current) — Signal Processing
+### Phase 2 ✅ — Signal Processing
 
-- Generate FIR low-pass coefficients offline (Python/scipy), embed as
-  `const float` array in flash
-- Apply per-axis filtering using `arm_fir_f32` from CMSIS-DSP
-- Benchmark against scalar implementation to quantify SIMD speedup
-- Compare fixed-point (`arm_fir_q15`) vs. float performance
+- ✅ Generate FIR low-pass coefficients offline (Python/scipy, 31-tap,
+  fs = 500 Hz, cutoff = 5 Hz), embed as `const float` array in flash
+  (`Tools/generate_fir.py`)
+- ✅ Per-axis FIR filtering via a ring-buffer convolution, fused into
+  pitch/roll with a complementary filter (`signal_processing.c`)
+- ✅ **Hand-written SIMD** (no CMSIS-DSP): `f32` loop-unrolled and `q15`
+  using the `__SMLAD` dual-MAC instruction, benchmarked against a scalar
+  baseline with the Cortex-M7 DWT cycle counter (`fir_bench.c`, `dwt.h`)
+- ✅ Rule-based shake recognizer (left-right / up-down / forward-back) as
+  a baseline for the Phase 3 CNN
+
+**SIMD results** (31-tap, 256-sample block, `-O2`, vs scalar baseline):
+
+| Implementation | cyc/sample | Speedup |
+|----------------|-----------:|--------:|
+| f32 scalar     | 998        | 1.00×   |
+| f32 unrolled   | 616        | 1.61×   |
+| q15 `__SMLAD`  | 297        | 3.35×   |
+
+Full analysis (including the `-O0` vs `-O2` contrast) in
+[`Benchmark/results.md`](Benchmark/results.md).
 
 ### Phase 3 — On-device Inference
 
