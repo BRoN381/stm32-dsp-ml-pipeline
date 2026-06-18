@@ -72,6 +72,22 @@ void uart_print_int(int16_t val) {
     }
 }
 
+void uart_print_uint(uint32_t val) {
+    char buf[10];
+    int i = 0;
+    if (val == 0) {
+        uart_write_char('0');
+        return;
+    }
+    while (val > 0) {
+        buf[i++] = '0' + (val % 10);
+        val /= 10;
+    }
+    for (int j = i - 1; j >= 0; j--) {
+        uart_write_char(buf[j]);
+    }
+}
+
 void uart_print_hex32(uint32_t val) {
     const char hex[] = "0123456789ABCDEF";
     uart_write_char('0');

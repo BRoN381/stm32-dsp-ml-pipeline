@@ -2,6 +2,10 @@
 #include "imu_driver.h"
 #include "uart.h"
 #include "signal_processing.h"
+#include "fir_bench.h"
+
+/* Set to 1 to run the FIR scalar-vs-SIMD benchmark once at startup. */
+#define RUN_FIR_BENCH 1
 
 /* ============================================================
  *   MODE selector
@@ -40,6 +44,10 @@ static void app_run(void) {
     SignalProcessing_Init(&g_proc);
     uart_print("IMU init done.\r\n");
 
+#if RUN_FIR_BENCH
+    fir_benchmark_run();   /* one-shot scalar-vs-SIMD timing report */
+#endif
+
     while (1) {
         if (imu_sample_pending) {
             imu_sample_pending = 0;
@@ -68,12 +76,12 @@ static void app_run(void) {
 
             /* Raw vs FIR-filtered acc_z (last sample, time-aligned) so the
                smoothing is directly visible, plus fused attitude. */
-            uart_print("Batch #"); uart_print_int(batch_received_count);
-            uart_print(" az_raw="); uart_print_int(imu_batch[BATCH_SIZE_SAMPLES - 1].acc_z);
-            uart_print(" az_filt="); uart_print_int((int16_t)g_proc.filt_acc_z);
-            uart_print(" | pitch="); uart_print_int((int16_t)g_proc.attitude.pitch);
-            uart_print(" roll="); uart_print_int((int16_t)g_proc.attitude.roll);
-            uart_print("\r\n");
+            // uart_print("Batch #"); uart_print_int(batch_received_count);
+            // uart_print(" az_raw="); uart_print_int(imu_batch[BATCH_SIZE_SAMPLES - 1].acc_z);
+            // uart_print(" az_filt="); uart_print_int((int16_t)g_proc.filt_acc_z);
+            // uart_print(" | pitch="); uart_print_int((int16_t)g_proc.attitude.pitch);
+            // uart_print(" roll="); uart_print_int((int16_t)g_proc.attitude.roll);
+            // uart_print("\r\n");
         }
     }
 }
