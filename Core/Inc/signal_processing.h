@@ -94,10 +94,13 @@ typedef struct {
     FIR_FilterState gyro_z_filter;
     Complementary_FilterState attitude;
 
-    /* Most recent FIR-filtered accelerometer outputs (for inspection/debug). */
+    /* Most recent FIR-filtered outputs (for inspection / data streaming). */
     float filt_acc_x;
     float filt_acc_y;
     float filt_acc_z;
+    float filt_gyro_x;
+    float filt_gyro_y;
+    float filt_gyro_z;
 
     GestureState gesture;       // shake recognizer state
     GestureType  last_gesture;  // result of the most recent Update (GESTURE_NONE if none)

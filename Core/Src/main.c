@@ -7,6 +7,12 @@
 /* Set to 1 to run the FIR scalar-vs-SIMD benchmark once at startup. */
 #define RUN_FIR_BENCH 1
 
+/* Set to 1 to stream filtered 6-axis data as CSV @ 50 Hz for training-data
+   collection (see Model/collect_data.py). Suppresses gesture/benchmark
+   output so the UART carries only the CSV stream. */
+#define STREAM_TRAINING_DATA 1
+#define STREAM_DECIM 10        /* 500 Hz / 10 = 50 Hz output rate */
+
 /* ============================================================
  *   MODE selector
  *   0 = main application (polling-in-ISR IMU read)
@@ -44,8 +50,12 @@ static void app_run(void) {
     SignalProcessing_Init(&g_proc);
     uart_print("IMU init done.\r\n");
 
-#if RUN_FIR_BENCH
+#if RUN_FIR_BENCH && !STREAM_TRAINING_DATA
     fir_benchmark_run();   /* one-shot scalar-vs-SIMD timing report */
+#endif
+
+#if STREAM_TRAINING_DATA
+    static int stream_decim = 0;
 #endif
 
     while (1) {
@@ -67,11 +77,25 @@ static void app_run(void) {
                     (float)imu_batch[i].gyro_x, (float)imu_batch[i].gyro_y, (float)imu_batch[i].gyro_z,
                     IMU_DT);
 
+#if STREAM_TRAINING_DATA
+                /* Decimate 500 Hz -> 50 Hz, stream filtered 6-axis as CSV:
+                   ax,ay,az,gx,gy,gz */
+                if (++stream_decim >= STREAM_DECIM) {
+                    stream_decim = 0;
+                    uart_print_int((int16_t)g_proc.filt_acc_x);  uart_write_char(',');
+                    uart_print_int((int16_t)g_proc.filt_acc_y);  uart_write_char(',');
+                    uart_print_int((int16_t)g_proc.filt_acc_z);  uart_write_char(',');
+                    uart_print_int((int16_t)g_proc.filt_gyro_x); uart_write_char(',');
+                    uart_print_int((int16_t)g_proc.filt_gyro_y); uart_write_char(',');
+                    uart_print_int((int16_t)g_proc.filt_gyro_z); uart_print("\r\n");
+                }
+#else
                 if (g_proc.last_gesture != GESTURE_NONE) {
                     uart_print(">>> GESTURE: ");
                     uart_print(Gesture_Name(g_proc.last_gesture));
                     uart_print("\r\n");
                 }
+#endif
             }
 
             /* Raw vs FIR-filtered acc_z (last sample, time-aligned) so the

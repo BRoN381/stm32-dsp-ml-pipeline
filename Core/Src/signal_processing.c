@@ -26,11 +26,12 @@ const float FIR_COEFFS_LOWPASS[FIR_TAPS] = {
 };
 
 /*
- * Gyroscope sensitivity for the default +/-250 dps full-scale range
- * (MPU_GYRO_CFG left at 0x00 in IMU_Init): 131 LSB per deg/s.
+ * Gyroscope sensitivity for the +/-500 dps full-scale range
+ * (MPU_GYRO_CFG = 0x08 in IMU_Init): 65.5 LSB per deg/s.
+ * Must match the FS_SEL bits set in IMU_Init.
  * Raw counts are divided by this to obtain deg/s before integration.
  */
-#define GYRO_SENS_250DPS 131.0f
+#define GYRO_SENS_500DPS 65.5f
 #define RAD_TO_DEG (180.0f / M_PI)
 
 /* ====================================================================
@@ -137,16 +138,19 @@ void SignalProcessing_Update(IMU_ProcessingState* state,
     float az = FIR_ProcessSingle(&state->acc_z_filter,  raw_az, FIR_COEFFS_LOWPASS);
     float gx = FIR_ProcessSingle(&state->gyro_x_filter, raw_gx, FIR_COEFFS_LOWPASS);
     float gy = FIR_ProcessSingle(&state->gyro_y_filter, raw_gy, FIR_COEFFS_LOWPASS);
-    (void)FIR_ProcessSingle(&state->gyro_z_filter, raw_gz, FIR_COEFFS_LOWPASS);
+    float gz = FIR_ProcessSingle(&state->gyro_z_filter, raw_gz, FIR_COEFFS_LOWPASS);
 
-    /* Cache filtered accelerometer outputs for inspection. */
+    /* Cache filtered outputs for inspection / data streaming. */
     state->filt_acc_x = ax;
     state->filt_acc_y = ay;
     state->filt_acc_z = az;
+    state->filt_gyro_x = gx;
+    state->filt_gyro_y = gy;
+    state->filt_gyro_z = gz;
 
     /* 2. Convert filtered gyro counts to deg/s before fusing. */
-    float gx_dps = gx / GYRO_SENS_250DPS;
-    float gy_dps = gy / GYRO_SENS_250DPS;
+    float gx_dps = gx / GYRO_SENS_500DPS;
+    float gy_dps = gy / GYRO_SENS_500DPS;
 
     /* 3. Update attitude estimate (pitch/roll). */
     Complementary_Process(&state->attitude, ax, ay, az, gx_dps, gy_dps, dt);

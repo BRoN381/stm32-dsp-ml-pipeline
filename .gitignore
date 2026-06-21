@@ -13,3 +13,10 @@ Startup/
 
 # Claude Code local config
 .claude/
+
+# Python
+__pycache__/
+*.pyc
+
+# Collected training data (kept local; dir tracked via .gitkeep)
+Model/dataset/*.csv

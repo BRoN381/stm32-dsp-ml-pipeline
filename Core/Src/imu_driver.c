@@ -254,6 +254,11 @@ void IMU_Init(void) {
     I2C_WriteReg(MPU_CONFIG, 0x01);       /* DLPF 188 Hz, gyro 1kHz */
     I2C_WriteReg(MPU_SMPLRT_DIV, 0x01);   /* 500 Hz sample rate */
 
+    /* Full-scale ranges widened to avoid clipping during gestures.
+       Keep GYRO_SENS_500DPS in signal_processing.c in sync with GYRO_CFG. */
+    I2C_WriteReg(MPU_GYRO_CFG, 0x08);     /* gyro  +/-500 dps  (65.5 LSB/dps) */
+    I2C_WriteReg(MPU_ACCEL_CFG, 0x08);    /* accel +/-4 g      (8192 LSB/g)   */
+
     I2C_WriteReg(MPU_INT_PIN_CFG, 0x00);  /* INT active high, push-pull, 50us */
 
     /* NO FIFO setup — we read sensor registers directly each EXTI */
